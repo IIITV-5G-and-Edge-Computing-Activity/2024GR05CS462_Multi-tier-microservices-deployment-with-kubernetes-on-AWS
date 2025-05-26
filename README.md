@@ -9,6 +9,13 @@ TruVoice - Where your identity remains a secret. Now with the power of AI.
 
 🎥 [Click here to watch the video](https://drive.google.com/file/d/14Rq4M2Jejxe0DEhsQElM9__MlUWLtlg_/view?usp=sharing)
 
+## Group Members
+
+- Kirtan Parikh (202251085)
+- Rushikesh Chaudhari (202251113)
+- Yash Bhattad (202251162)
+- Gopal Verma (202251173)
+
 
 ## Table of Contents
 
@@ -233,8 +240,4 @@ Contributions are what make the open-source community such an amazing place to l
 ## License
 
 Distributed under the MIT License. See `LICENSE` for more information.
-
-## Contributors
-
-- Kirtan Parikh (@Kirtan134)
 
