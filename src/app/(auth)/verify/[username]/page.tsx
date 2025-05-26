@@ -10,26 +10,37 @@ import {
 } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
 import { useToast } from '@/components/ui/use-toast';
+import { verifySchema } from '@/schemas/verifySchema';
 import { ApiResponse } from '@/types/ApiResponse';
 import { zodResolver } from '@hookform/resolvers/zod';
 import axios, { AxiosError } from 'axios';
 import { useParams, useRouter } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import * as z from 'zod';
-import { verifySchema } from '@/schemas/verifySchema';
 
 export default function VerifyAccount() {
   const router = useRouter();
-  const params = useParams<{ username: string }>();
+  const params = useParams();
   const { toast } = useToast();
   const form = useForm<z.infer<typeof verifySchema>>({
     resolver: zodResolver(verifySchema),
   });
 
   const onSubmit = async (data: z.infer<typeof verifySchema>) => {
+    const username = params?.username;
+    
+    if (!username || typeof username !== 'string') {
+      toast({
+        title: 'Error',
+        description: 'Username is missing',
+        variant: 'destructive',
+      });
+      return;
+    }
+
     try {
       const response = await axios.post<ApiResponse>(`/api/verify-code`, {
-        username: params.username,
+        username,
         code: data.code,
       });
 

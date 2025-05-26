@@ -1,0 +1,166 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ deployment ]
+  pull_request:
+    branches: [ deployment ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      MONGODB_URI: ${{ secrets.MONGODB_URI }}
+      NEXTAUTH_SECRET: ${{ secrets.NEXTAUTH_SECRET }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      CLIENT_ID: ${{ secrets.CLIENT_ID }}
+      CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
+      REDIRECT_URI: ${{ secrets.REDIRECT_URI }}
+      REFRESH_TOKEN: ${{ secrets.REFRESH_TOKEN }}
+      EMAIL: ${{ secrets.EMAIL }}
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+          cache: 'npm'
+          
+      - name: Install dependencies
+        run: npm ci
+        
+      - name: Run linting
+        run: npm run lint
+        
+      - name: Build application
+        run: npm run build
+        
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+        
+      - name: Configure AWS credentials for ECR
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+        
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v1
+        
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.login-ecr.outputs.registry }}/truvoice:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            MONGODB_URI=${{ secrets.MONGODB_URI }}
+            NEXTAUTH_SECRET=${{ secrets.NEXTAUTH_SECRET }}
+            GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}
+            CLIENT_ID=${{ secrets.CLIENT_ID }}
+            CLIENT_SECRET=${{ secrets.CLIENT_SECRET }}
+            REDIRECT_URI=${{ secrets.REDIRECT_URI }}
+            REFRESH_TOKEN=${{ secrets.REFRESH_TOKEN }}
+            EMAIL=${{ secrets.EMAIL }}
+          secrets: |
+            "MONGODB_URI=${{ secrets.MONGODB_URI }}"
+            "NEXTAUTH_SECRET=${{ secrets.NEXTAUTH_SECRET }}"
+            "GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}"
+            "CLIENT_ID=${{ secrets.CLIENT_ID }}"
+            "CLIENT_SECRET=${{ secrets.CLIENT_SECRET }}"
+            "REDIRECT_URI=${{ secrets.REDIRECT_URI }}"
+            "REFRESH_TOKEN=${{ secrets.REFRESH_TOKEN }}"
+            "EMAIL=${{ secrets.EMAIL }}"
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Configure AWS credentials for EC2
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ap-south-1
+          
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: 1.5.0
+          
+      - name: Terraform Init
+        run: |
+          cd terraform
+          terraform init
+          
+      - name: Terraform Plan
+        run: |
+          cd terraform
+          terraform plan -var="environment=dev" -out=tfplan
+          
+      - name: Terraform Apply
+        run: |
+          cd terraform
+          terraform apply -auto-approve tfplan
+          
+      - name: Get K3s Master IP
+        id: k3s-ip
+        run: |
+          cd terraform
+          
+          # Use a different approach to get the output
+          # First, get all outputs in JSON format
+          OUTPUTS=$(terraform output -json)
+          
+          # Check if the output exists and extract the value
+          if echo "$OUTPUTS" | jq -e '.k3s_master_public_ip' > /dev/null; then
+            # Extract the value using jq
+            MASTER_IP=$(echo "$OUTPUTS" | jq -r '.k3s_master_public_ip.value')
+            
+            if [ -n "$MASTER_IP" ]; then
+              echo "K3S_MASTER_IP=$MASTER_IP" >> $GITHUB_OUTPUT
+              echo "Successfully set K3S_MASTER_IP to $MASTER_IP"
+            else
+              echo "Error: k3s_master_public_ip output exists but has no value"
+              exit 1
+            fi
+          else
+            echo "Error: k3s_master_public_ip output does not exist in Terraform state"
+            echo "Available outputs:"
+            echo "$OUTPUTS" | jq -r 'keys'
+            exit 1
+          fi
+          
+      - name: Update Kubernetes manifests
+        run: |
+          # Update the image tag in the deployment.yaml
+          sed -i "s|image: .*|image: ${{ steps.login-ecr.outputs.registry }}/truvoice:${{ github.sha }}|g" k8s/deployment.yaml
+          
+      - name: Deploy to Kubernetes
+        run: |
+          # Get the kubeconfig from the master node
+          aws ssm get-parameter --name "/k3s/kubeconfig" --with-decryption --query Parameter.Value --output text > kubeconfig.yaml
+          export KUBECONFIG=kubeconfig.yaml
+          
+          # Apply the updated manifests
+          kubectl apply -f k8s/monitoring/namespace.yaml
+          kubectl apply -f k8s/monitoring/prometheus-config.yaml
+          kubectl apply -f k8s/monitoring/prometheus.yaml
+          kubectl apply -f k8s/monitoring/grafana.yaml
+          kubectl apply -f k8s/monitoring/grafana-ingress.yaml
+          kubectl apply -f k8s/service.yaml
+          kubectl apply -f k8s/deployment.yaml
+          kubectl apply -f k8s/secrets.yaml
+          kubectl apply -f k8s/ingress.yaml
+          
+          # Wait for the deployment to be ready
+          kubectl rollout status deployment/truvoice -n truvoice-dev --timeout=300s

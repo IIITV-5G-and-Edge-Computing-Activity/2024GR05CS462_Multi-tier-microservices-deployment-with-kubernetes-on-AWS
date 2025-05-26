@@ -1,29 +1,28 @@
 "use client";
 
-import React, { useState } from "react";
-import axios, { AxiosError } from "axios";
-import { zodResolver } from "@hookform/resolvers/zod";
-import { useForm } from "react-hook-form";
-import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Separator } from "@/components/ui/separator";
-import { CardHeader, CardContent, Card } from "@/components/ui/card";
-import { useCompletion } from "ai/react";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import {
-  Form,
-  FormControl,
-  FormField,
-  FormItem,
-  FormLabel,
-  FormMessage,
+    Form,
+    FormControl,
+    FormField,
+    FormItem,
+    FormMessage
 } from "@/components/ui/form";
+import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "@/components/ui/use-toast";
-import * as z from "zod";
+import { messageSchema } from "@/schemas/messageSchema";
 import { ApiResponse } from "@/types/ApiResponse";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { useCompletion } from "ai/react";
+import axios, { AxiosError } from "axios";
+import { Loader2 } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { messageSchema } from "@/schemas/messageSchema";
+import { useState } from "react";
+import { useForm } from "react-hook-form";
+import * as z from "zod";
 
 const specialChar = "||";
 
@@ -35,9 +34,9 @@ const initialMessageString =
   "What's your favorite movie?||Do you have any pets?||What's your dream job?";
 
 export default function SendMessage() {
-  const params = useParams<{ username: string }>();
-  const username = params.username;
-
+  const params = useParams();
+  const username = params?.username;
+  
   const {
     complete,
     completion,
@@ -53,14 +52,22 @@ export default function SendMessage() {
   });
 
   const messageContent = form.watch("content");
+  const [isLoading, setIsLoading] = useState(false);
 
   const handleMessageClick = (message: string) => {
     form.setValue("content", message);
   };
 
-  const [isLoading, setIsLoading] = useState(false);
-
   const onSubmit = async (data: z.infer<typeof messageSchema>) => {
+    if (!username || typeof username !== 'string') {
+      toast({
+        title: "Error",
+        description: "Username is missing",
+        variant: "destructive",
+      });
+      return;
+    }
+    
     setIsLoading(true);
     try {
       const response = await axios.post<ApiResponse>("/api/send-message", {
@@ -94,6 +101,16 @@ export default function SendMessage() {
       // Handle error appropriately
     }
   };
+
+  if (!username || typeof username !== 'string') {
+    return (
+      <div className="container mx-auto my-2 p-6 bg-white rounded max-w-4xl">
+        <h1 className="text-3xl font-bold mb-4 text-center text-red-500">
+          Error: Username not found
+        </h1>
+      </div>
+    );
+  }
 
   return (
     <div className="container mx-auto my-2 p-6 bg-white rounded max-w-4xl">
