@@ -3,7 +3,7 @@
 
 ### The World of Anonymous Feedback
 
-TruVoice - Where your identity remains a secret. Now with the power of AI.
+TruVoice - A Multi Tier Microservices deployment with Kubernetes on AWS.
 
 ### Deployment Video
 
